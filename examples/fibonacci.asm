@@ -1,0 +1,15 @@
+; Gera 8 iterações. Resultado final em R1/R2.
+MOV R0, 8
+MOV R1, 0
+MOV R2, 1
+MOV R4, 0
+LOOP:
+CMP R0, R4
+JZ DONE
+MOV R3, R1
+ADD R1, R2
+MOV R2, R3
+DEC R0
+JMP LOOP
+DONE:
+HLT

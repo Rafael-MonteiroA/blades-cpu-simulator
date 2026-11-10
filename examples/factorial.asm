@@ -1,0 +1,12 @@
+; fatorial de 5; resultado em R1
+MOV R0, 5
+MOV R1, 1
+MOV R2, 1
+LOOP:
+CMP R0, R2
+JZ DONE
+MUL R1, R0
+DEC R0
+JMP LOOP
+DONE:
+HLT
