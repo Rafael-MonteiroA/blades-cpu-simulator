@@ -6,6 +6,7 @@ use eframe::egui::{
     self, Color32, RichText, Stroke, Vec2,
     text::{LayoutJob, TextFormat},
 };
+use std::collections::VecDeque;
 
 pub struct BladesApp {
     cpu: Cpu,
@@ -23,6 +24,7 @@ pub struct BladesApp {
     line_addresses: Vec<(usize, u16)>,
     error: Option<String>,
     show_memory: bool,
+    console: VecDeque<String>,
 }
 impl BladesApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -50,6 +52,7 @@ impl BladesApp {
             line_addresses: vec![],
             error: None,
             show_memory: true,
+            console: VecDeque::new(),
         }
     }
     fn assemble(&mut self) {
@@ -67,11 +70,23 @@ impl BladesApp {
                     p.labels.len(),
                     ENTRY
                 );
+                self.log("INFO", self.message.clone());
             }
             Err(e) => {
                 self.error = Some(e.to_string());
                 self.message = format!("Erro de montagem · {e}");
+                self.log("ERROR", self.message.clone());
             }
+        }
+    }
+    fn log(&mut self, level: &str, message: impl Into<String>) {
+        self.console.push_back(format!(
+            "[{:08}] {level:<5} {}",
+            self.cpu.cycles,
+            message.into()
+        ));
+        if self.console.len() > 500 {
+            self.console.pop_front();
         }
     }
     fn card<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
@@ -324,9 +339,11 @@ impl BladesApp {
                             self.cpu.memory[a as usize] = v;
                             self.cpu.changed_memory = vec![a];
                             self.message = format!("RAM[{a:04X}] ← {v:02X}");
+                            self.log("INFO", self.message.clone());
                         }
                         _ => {
                             self.message = "Endereço (16 bits) ou byte hexadecimal inválido".into();
+                            self.log("ERROR", self.message.clone());
                         }
                     }
                 }
@@ -396,6 +413,7 @@ impl eframe::App for BladesApp {
                     if n == 0 && !self.cpu.halted {
                         self.running = false;
                         self.message = format!("Breakpoint em {:04X}", self.cpu.pc);
+                        self.log("WARN", self.message.clone());
                     }
                     if n > 0 {
                         self.message = format!("Executando · {n} instruções nesta atualização");
@@ -403,12 +421,14 @@ impl eframe::App for BladesApp {
                     if self.cpu.halted {
                         self.running = false;
                         self.message = "HALT · execução concluída".into();
+                        self.log("INFO", self.message.clone());
                     }
                 }
                 Err(e) => {
                     self.running = false;
                     self.error = Some(e.clone());
                     self.message = e;
+                    self.log("ERROR", self.message.clone());
                 }
             }
             ctx.request_repaint();
@@ -446,10 +466,12 @@ impl eframe::App for BladesApp {
                                 self.assembled = false;
                                 self.message = format!("Arquivo carregado: {}", self.file_path);
                                 self.error = None;
+                                self.log("INFO", self.message.clone());
                             }
                             Err(e) => {
                                 self.error = Some(e.to_string());
                                 self.message = format!("Falha ao abrir arquivo: {e}");
+                                self.log("ERROR", self.message.clone());
                             }
                         }
                     }
@@ -469,10 +491,12 @@ impl eframe::App for BladesApp {
                             Ok(()) => {
                                 self.message = format!("Arquivo salvo: {}", self.file_path);
                                 self.error = None;
+                                self.log("INFO", self.message.clone());
                             }
                             Err(e) => {
                                 self.error = Some(e.to_string());
                                 self.message = format!("Falha ao salvar arquivo: {e}");
+                                self.log("ERROR", self.message.clone());
                             }
                         }
                     }
@@ -488,10 +512,12 @@ impl eframe::App for BladesApp {
                             Ok(()) => {
                                 self.message = format!("Arquivo salvo: {}", self.file_path);
                                 self.error = None;
+                                self.log("INFO", self.message.clone());
                             }
                             Err(e) => {
                                 self.error = Some(e.to_string());
                                 self.message = format!("Falha ao salvar arquivo: {e}");
+                                self.log("ERROR", self.message.clone());
                             }
                         }
                     }
@@ -506,7 +532,15 @@ impl eframe::App for BladesApp {
                     )
                     .clicked()
                 {
-                    self.running = !self.running
+                    self.running = !self.running;
+                    self.log(
+                        "INFO",
+                        if self.running {
+                            "Execução iniciada"
+                        } else {
+                            "Execução pausada"
+                        },
+                    );
                 }
                 if ui
                     .add_enabled(
@@ -520,21 +554,25 @@ impl eframe::App for BladesApp {
                         Ok(instruction) => {
                             self.message = format!("Step · {instruction}");
                             self.error = None;
+                            self.log("INFO", self.message.clone());
                         }
                         Err(e) => {
                             self.error = Some(e.clone());
                             self.message = e;
+                            self.log("ERROR", self.message.clone());
                         }
                     }
                 }
                 if ui.button("Stop").clicked() {
-                    self.running = false
+                    self.running = false;
+                    self.log("INFO", "Execução interrompida pelo usuário");
                 }
                 if ui.button("Reset").clicked() {
                     self.cpu.reset();
                     self.running = false;
                     self.assembled = false;
                     self.message = "CPU reiniciada".into();
+                    self.log("INFO", "CPU e RAM reiniciadas");
                 }
                 ui.separator();
                 ui.label("Rate");
@@ -555,9 +593,13 @@ impl eframe::App for BladesApp {
                     {
                         if self.cpu.breakpoints.contains(&addr) {
                             self.cpu.breakpoints.retain(|x| *x != addr);
+                            self.log("INFO", format!("Breakpoint removido de {addr:04X}"));
                         } else {
                             self.cpu.breakpoints.push(addr);
+                            self.log("INFO", format!("Breakpoint adicionado em {addr:04X}"));
                         }
+                    } else {
+                        self.log("WARN", "Endereço de breakpoint inválido");
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -634,6 +676,7 @@ impl eframe::App for BladesApp {
                 }
                 ui.separator();
                 ui.collapsing("Source breakpoints", |ui| {
+                    let mut breakpoint_events = Vec::new();
                     egui::ScrollArea::vertical()
                         .max_height(120.0)
                         .show(ui, |ui| {
@@ -658,12 +701,20 @@ impl eframe::App for BladesApp {
                                 if ui.checkbox(&mut enabled, label).changed() {
                                     if enabled {
                                         self.cpu.breakpoints.push(*address);
+                                        breakpoint_events.push(format!(
+                                            "Breakpoint de linha {line} ativado em {address:04X}"
+                                        ));
                                     } else {
                                         self.cpu.breakpoints.retain(|a| a != address);
+                                        breakpoint_events
+                                            .push(format!("Breakpoint de linha {line} removido"));
                                     }
                                 }
                             }
                         });
+                    for event in breakpoint_events {
+                        self.log("INFO", event);
+                    }
                 });
                 ui.separator();
                 ui.label(
@@ -850,12 +901,32 @@ impl eframe::App for BladesApp {
                 );
             });
             egui::ScrollArea::vertical()
-                .max_height(330.0)
+                .max_height(250.0)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     for item in self.cpu.trace.iter().rev() {
                         ui.label(RichText::new(item).monospace().size(12.0));
                     }
+                });
+            ui.add_space(8.0);
+            egui::CollapsingHeader::new(format!("Console · {} events", self.console.len()))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("CPU · ASSEMBLER · DEBUGGER").size(10.0).color(Color32::GRAY));
+                        if ui.button("Clear").clicked() { self.console.clear(); }
+                    });
+                    egui::ScrollArea::vertical().max_height(110.0).stick_to_bottom(true).show(ui, |ui| {
+                        if self.console.is_empty() {
+                            ui.label(RichText::new("Sem eventos. Monte ou execute um programa para ver as mensagens.").italics().color(Color32::GRAY));
+                        }
+                        for entry in self.console.iter().rev().take(50) {
+                            let color = if entry.contains(" ERROR ") { Color32::LIGHT_RED }
+                                else if entry.contains(" WARN ") { Color32::YELLOW }
+                                else { Color32::from_rgb(174, 190, 205) };
+                            ui.label(RichText::new(entry).monospace().size(11.0).color(color));
+                        }
+                    });
                 });
             ui.add_space(8.0);
             if self.show_memory {
