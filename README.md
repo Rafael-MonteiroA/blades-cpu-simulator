@@ -99,4 +99,4 @@ Consulte [`docs/architecture.md`](docs/architecture.md), [`docs/instruction_set.
 
 ## Escopo atual
 
-O editor usa destaque lexical leve, sem parser incremental, autocomplete ou refatoração de labels. Registradores e words são inspecionáveis pelos painéis, mas sua edição manual ainda não está disponível; bytes de RAM podem ser editados. Preferências não são persistidas e não há CLI independente, empacotador de instalador ou benchmarks. A execução é sequencial, sem pipeline paralelo. O suporte em Linux está habilitado no eframe, mas ainda precisa de validação em CI e uso manual.
+O editor usa destaque lexical leve, sem parser incremental, autocomplete ou refatoração de labels. Registradores e words são inspecionáveis pelos painéis, mas sua edição manual ainda não está disponível; bytes de RAM podem ser editados. Velocidade e preferências do Inspector são persistidas; ainda não há CLI independente, empacotador de instalador ou benchmarks. A execução é sequencial, sem pipeline paralelo. O suporte em Linux está habilitado no eframe, mas ainda precisa de validação em CI e uso manual.

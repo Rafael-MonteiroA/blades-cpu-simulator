@@ -8,12 +8,32 @@ use eframe::egui::{
 };
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 enum MemoryFormat {
     Hex,
     Decimal,
     Binary,
     Ascii,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+struct AppSettings {
+    speed: usize,
+    memory_address: String,
+    memory_format: MemoryFormat,
+    show_memory: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            speed: 32,
+            memory_address: "0200".into(),
+            memory_format: MemoryFormat::Hex,
+            show_memory: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +66,10 @@ pub struct BladesApp {
 }
 impl BladesApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let settings = cc
+            .storage
+            .and_then(|storage| eframe::get_value::<AppSettings>(storage, "app_settings"))
+            .unwrap_or_default();
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.window_fill = Color32::from_rgb(18, 22, 29);
@@ -59,9 +83,9 @@ impl BladesApp {
             source: include_str!("../examples/hello.asm").into(),
             assembled: false,
             running: false,
-            speed: 32,
+            speed: settings.speed.clamp(1, 500),
             message: "Pronto · BLADE-16 · 64 KB".into(),
-            memory_address: "0200".into(),
+            memory_address: settings.memory_address,
             breakpoint_address: "0200".into(),
             file_path: String::new(),
             saved_source: include_str!("../examples/hello.asm").into(),
@@ -71,8 +95,8 @@ impl BladesApp {
             source_lines: vec![],
             line_addresses: vec![],
             error: None,
-            show_memory: true,
-            memory_format: MemoryFormat::Hex,
+            show_memory: settings.show_memory,
+            memory_format: settings.memory_format,
             program_bytes: 0,
             console: VecDeque::new(),
         }
@@ -1372,5 +1396,18 @@ impl eframe::App for BladesApp {
                 }
             }
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(
+            storage,
+            "app_settings",
+            &AppSettings {
+                speed: self.speed,
+                memory_address: self.memory_address.clone(),
+                memory_format: self.memory_format,
+                show_memory: self.show_memory,
+            },
+        );
     }
 }
