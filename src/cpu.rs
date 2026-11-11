@@ -461,6 +461,31 @@ mod tests {
         assert_eq!(c.pc, ENTRY + 8);
     }
     #[test]
+    fn breakpoint_stops_before_executing_its_address() {
+        let p = assemble("MOV R0, 7\nHLT").unwrap();
+        let mut c = Cpu::new();
+        c.load(&p.bytes, &p.vectors);
+        c.breakpoints.push(ENTRY);
+        assert_eq!(c.run_batch(10).unwrap(), 0);
+        assert_eq!(c.pc, ENTRY);
+        assert_eq!(c.cycles, 0);
+        c.breakpoints.clear();
+        assert_eq!(c.run_batch(1).unwrap(), 1);
+        assert_eq!(c.r[0], 7);
+        assert_eq!(c.cycles, 1);
+    }
+    #[test]
+    fn invalid_opcode_does_not_advance_execution_state() {
+        let mut c = Cpu::new();
+        c.memory[ENTRY as usize] = 0xff;
+        let error = c.step().unwrap_err();
+        assert!(error.contains("FF"));
+        assert_eq!(c.pc, ENTRY);
+        assert_eq!(c.cycles, 0);
+        assert!(c.trace.is_empty());
+        assert_eq!(c.last_instruction, "—");
+    }
+    #[test]
     fn interrupt_saves_and_restores_context() {
         let p = assemble(".VECTOR 1, HANDLER\nMOV R0, 7\nMOV R3, 1\nINT 1\nHLT\nHANDLER:\nMOV R2, 0xCAFE\nSTORE [0x4000], R2\nIRET").unwrap();
         let mut c = Cpu::new();

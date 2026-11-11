@@ -58,7 +58,9 @@ impl BladesApp {
     fn assemble(&mut self) {
         match assembler::assemble(&self.source) {
             Ok(p) => {
+                let breakpoints = self.cpu.breakpoints.clone();
                 self.cpu.load(&p.bytes, &p.vectors);
+                self.cpu.breakpoints = breakpoints;
                 self.source_lines = p.lines;
                 self.line_addresses = p.line_addresses;
                 self.assembled = true;
@@ -73,6 +75,8 @@ impl BladesApp {
                 self.log("INFO", self.message.clone());
             }
             Err(e) => {
+                self.assembled = false;
+                self.running = false;
                 self.error = Some(e.to_string());
                 self.message = format!("Erro de montagem · {e}");
                 self.log("ERROR", self.message.clone());
@@ -112,13 +116,16 @@ impl BladesApp {
         RichText::new(s.into()).monospace()
     }
     fn pc_source_line(&self) -> Option<usize> {
-        if !self.assembled || self.source.trim_end_matches('\n') != self.source_lines.join("\n") {
+        if !self.source_ready() {
             return None;
         }
         self.line_addresses
             .iter()
             .find(|(_, address)| *address == self.cpu.pc)
             .map(|(line, _)| *line)
+    }
+    fn source_ready(&self) -> bool {
+        self.assembled && self.source.trim_end_matches('\n') == self.source_lines.join("\n")
     }
     fn source_at(&self, address: u16) -> Option<(usize, &str)> {
         let line = self.line_addresses.iter().find(|(_, pc)| *pc == address)?.0;
@@ -645,6 +652,7 @@ impl eframe::App for BladesApp {
                             Ok(text) => {
                                 self.source = text;
                                 self.assembled = false;
+                                self.running = false;
                                 self.message = format!("Arquivo carregado: {}", self.file_path);
                                 self.error = None;
                                 self.log("INFO", self.message.clone());
@@ -708,7 +716,7 @@ impl eframe::App for BladesApp {
                 }
                 if ui
                     .add_enabled(
-                        self.assembled && !self.cpu.halted,
+                        self.source_ready() && !self.cpu.halted,
                         egui::Button::new(if self.running { "Ⅱ Pause" } else { "▶ Run" }),
                     )
                     .clicked()
@@ -725,7 +733,7 @@ impl eframe::App for BladesApp {
                 }
                 if ui
                     .add_enabled(
-                        self.assembled && !self.cpu.halted,
+                        self.source_ready() && !self.cpu.halted,
                         egui::Button::new("Step"),
                     )
                     .clicked()
@@ -749,11 +757,18 @@ impl eframe::App for BladesApp {
                     self.log("INFO", "Execução interrompida pelo usuário");
                 }
                 if ui.button("Reset").clicked() {
-                    self.cpu.reset();
                     self.running = false;
-                    self.assembled = false;
-                    self.message = "CPU reiniciada".into();
-                    self.log("INFO", "CPU e RAM reiniciadas");
+                    let breakpoints = self.cpu.breakpoints.clone();
+                    self.assemble();
+                    if self.assembled {
+                        self.cpu.breakpoints = breakpoints;
+                        self.message = "CPU reiniciada · programa recarregado".into();
+                        self.log("INFO", "CPU reiniciada e programa recarregado");
+                    } else {
+                        self.cpu.reset();
+                        self.message = "CPU reiniciada · monte um programa válido".into();
+                        self.log("WARN", "CPU reiniciada sem programa válido");
+                    }
                 }
                 ui.separator();
                 ui.label("Rate");
@@ -839,17 +854,28 @@ impl eframe::App for BladesApp {
                 });
                 ui.separator();
                 let current_line = self.pc_source_line();
+                if self.assembled && !self.source_ready() {
+                    ui.label(
+                        RichText::new("Fonte modificada · monte novamente antes de executar")
+                            .color(Color32::from_rgb(231, 176, 92)),
+                    );
+                }
                 egui::ScrollArea::both().show(ui, |ui| {
                     let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
                         Self::assembly_layout(ui, text, wrap_width, current_line)
                     };
-                    ui.add(
+                    let response = ui.add(
                         egui::TextEdit::multiline(&mut self.source)
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
                             .desired_rows(30)
                             .layouter(&mut layouter),
                     );
+                    if response.changed() {
+                        self.running = false;
+                        self.error = None;
+                        self.message = "Fonte modificada · monte novamente para executar".into();
+                    }
                 });
                 if let Some(e) = &self.error {
                     ui.separator();
@@ -857,6 +883,10 @@ impl eframe::App for BladesApp {
                 }
                 ui.separator();
                 ui.collapsing("Source breakpoints", |ui| {
+                    if !self.source_ready() {
+                        ui.label("Monte a fonte atual para atualizar os breakpoints por linha.");
+                        return;
+                    }
                     let mut breakpoint_events = Vec::new();
                     egui::ScrollArea::vertical()
                         .max_height(120.0)

@@ -55,6 +55,8 @@ cargo build --release
 cargo run --release
 ```
 
+O workflow de CI compila e executa a suíte de testes em Windows a cada push e pull request.
+
 ## Fluxo rápido
 
 1. Abra um arquivo `.asm` ou edite o exemplo no painel esquerdo.
@@ -97,4 +99,4 @@ Consulte [`docs/architecture.md`](docs/architecture.md), [`docs/instruction_set.
 
 ## Escopo atual
 
-Esta é uma versão funcional inicial. O editor ainda não tem gutter numérico sincronizado nem syntax highlighting com parser completo; a sintaxe é destacada por regras léxicas simples. Não há edição direta de words ou registradores pela tabela, configuração persistente, CLI independente ou benchmarks. O painel apresenta pipeline sequencial e não simula paralelismo.
+O editor usa destaque lexical leve e ainda não oferece gutter numérico, autocomplete ou refatoração de labels. Registradores e words são inspecionáveis pelos painéis, mas sua edição manual ainda não está disponível; bytes de RAM podem ser editados. Preferências não são persistidas e não há CLI independente, empacotador de instalador ou benchmarks. A execução é sequencial, sem pipeline paralelo. O suporte em Linux está habilitado no eframe, mas ainda precisa de validação em CI e uso manual.

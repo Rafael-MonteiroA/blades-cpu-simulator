@@ -418,4 +418,18 @@ mod tests {
         assert!(assemble(".ORG 0x0300\n.ORG 0x0200").is_err());
         assert!(assemble("1BAD: HLT").is_err());
     }
+    #[test]
+    fn validates_program_end_at_memory_boundary() {
+        let last_byte = assemble(".ORG 0xFFFF\n.BYTE 0xAA").unwrap();
+        assert_eq!(last_byte.bytes.len(), 0x10000 - ENTRY as usize);
+        assert_eq!(last_byte.bytes.last(), Some(&0xaa));
+        assert!(assemble(".ORG 0xFFFF\n.WORD 1").is_err());
+    }
+    #[test]
+    fn accepts_case_insensitive_labels_and_hex_suffix() {
+        let p = assemble("JMP end\n.BYTE 0Ah\nEND: HLT").unwrap();
+        assert_eq!(p.labels["END"], ENTRY + 4);
+        assert_eq!(p.bytes[3], 10);
+        assert_eq!(p.bytes[4], 1);
+    }
 }
