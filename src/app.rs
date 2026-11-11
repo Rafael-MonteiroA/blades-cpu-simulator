@@ -8,7 +8,7 @@ use eframe::egui::{
 };
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 enum MemoryFormat {
     Hex,
     Decimal,
@@ -16,7 +16,7 @@ enum MemoryFormat {
     Ascii,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 struct AppSettings {
     speed: usize,
@@ -33,6 +33,41 @@ impl Default for AppSettings {
             memory_format: MemoryFormat::Hex,
             show_memory: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct MemoryStorage(HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_string(), value);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn app_settings_round_trip_through_eframe_storage() {
+        let expected = AppSettings {
+            speed: 240,
+            memory_address: "4A00".into(),
+            memory_format: MemoryFormat::Binary,
+            show_memory: false,
+        };
+        let mut storage = MemoryStorage::default();
+        eframe::set_value(&mut storage, "app_settings", &expected);
+        let restored = eframe::get_value::<AppSettings>(&storage, "app_settings").unwrap();
+        assert_eq!(restored, expected);
     }
 }
 
