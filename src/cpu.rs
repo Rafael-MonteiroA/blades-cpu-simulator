@@ -104,9 +104,13 @@ impl Cpu {
         self.changed_registers.clear();
         self.changed_memory.clear();
         let start = self.pc;
+        let before_r = self.r;
+        let before_pc = self.pc;
+        let before_sp = self.sp;
+        let before_ir = self.ir;
+        let before_flags = self.flags;
         let op = self.fetch8();
         self.ir = op as u16;
-        let mut touched = Vec::new();
         let name = match op {
             0x00 => "NOP".to_string(),
             0x01 => {
@@ -117,7 +121,6 @@ impl Cpu {
                 let d = self.reg();
                 let v = self.fetch16();
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 format!("MOV R{d}, {v}")
             }
@@ -126,7 +129,6 @@ impl Cpu {
                 let s = self.reg();
                 let v = self.r[s];
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 format!("MOV R{d}, R{s}")
             }
@@ -135,7 +137,6 @@ impl Cpu {
                 let a = self.fetch16();
                 let v = self.read_word(a);
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 format!("LOAD R{d}, [{a:04X}]")
             }
@@ -157,7 +158,6 @@ impl Cpu {
                 let v = self.read_word(self.sp);
                 self.sp = self.sp.wrapping_add(2);
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 format!("POP R{d}")
             }
             0x20..=0x25 => {
@@ -181,7 +181,6 @@ impl Cpu {
                 };
                 let v = wide.0 as u16;
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.flags.c = match op {
                     0x20 => a as u32 + b as u32 > 0xffff,
                     0x21 => a < b,
@@ -205,7 +204,6 @@ impl Cpu {
                     !self.r[d]
                 };
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 self.flags.c = false;
                 self.flags.v = false;
@@ -231,7 +229,6 @@ impl Cpu {
                     (self.r[d] >> (n - 1)) & 1 != 0
                 };
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 format!("{} R{d}, {n}", if op == 0x28 { "SHL" } else { "SHR" })
             }
@@ -240,7 +237,6 @@ impl Cpu {
                 let before = self.r[d];
                 let v = before.wrapping_add(if op == 0x2a { 1 } else { u16::MAX });
                 self.r[d] = v;
-                touched.push(format!("R{d}"));
                 self.set_zn(v);
                 self.flags.c = if op == 0x2a {
                     before == u16::MAX
@@ -357,10 +353,42 @@ impl Cpu {
                 return Err(format!("Opcode inválido {op:02X} em {start:04X}"));
             }
         };
-        self.changed_registers = touched;
+        let mut changes = Vec::new();
+        for i in 0..8 {
+            if before_r[i] != self.r[i] {
+                changes.push(format!("R{i}"));
+            }
+        }
+        if before_pc != self.pc {
+            changes.push("PC".into());
+        }
+        if before_sp != self.sp {
+            changes.push("SP".into());
+        }
+        if before_ir != self.ir {
+            changes.push("IR".into());
+        }
+        if before_flags != self.flags {
+            changes.push("FLAGS".into());
+        }
+        self.changed_registers = changes;
         self.cycles += 1;
         self.last_instruction = name.clone();
-        self.trace.push_back(format!("{:04X}  {}", start, name));
+        let effects = self.changed_registers.join(",");
+        let writes = self
+            .changed_memory
+            .iter()
+            .map(|a| format!("M[{a:04X}]"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let summary = match (effects.is_empty(), writes.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => format!("  Δ {effects}"),
+            (true, false) => format!("  Δ {writes}"),
+            (false, false) => format!("  Δ {effects} {writes}"),
+        };
+        self.trace
+            .push_back(format!("{:04X}  {}{}", start, name, summary));
         if self.trace.len() > 300 {
             self.trace.pop_front();
         }
@@ -458,6 +486,22 @@ mod tests {
         assert_eq!(c.r[3], 0);
         assert_eq!(c.cycles, 0);
         assert_eq!(c.pc, ENTRY);
+    }
+    #[test]
+    fn step_records_real_register_flag_and_pc_deltas() {
+        let p = assemble("MOV R0, 65535\nMOV R1, 1\nADD R0, R1").unwrap();
+        let mut c = Cpu::new();
+        c.load(&p.bytes, &p.vectors);
+        c.run_batch(2).unwrap();
+        c.step().unwrap();
+        assert!(c.changed_registers.contains(&"R0".to_string()));
+        assert!(c.changed_registers.contains(&"PC".to_string()));
+        assert!(c.changed_registers.contains(&"FLAGS".to_string()));
+        assert!(
+            c.trace
+                .back()
+                .is_some_and(|entry| entry.contains("Δ R0") && entry.contains("FLAGS"))
+        );
     }
     #[test]
     fn shipped_programs_assemble_and_run() {

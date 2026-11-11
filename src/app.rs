@@ -227,7 +227,13 @@ impl BladesApp {
                     ("SP", self.cpu.sp),
                     ("IR", self.cpu.ir),
                 ] {
-                    ui.label(RichText::new(n).strong());
+                    ui.label(RichText::new(n).strong().color(
+                        if self.cpu.changed_registers.iter().any(|x| x == n) {
+                            Color32::LIGHT_GREEN
+                        } else {
+                            Color32::WHITE
+                        },
+                    ));
                     ui.label(Self::mono(format!("{v:04X}")));
                     ui.end_row();
                 }
@@ -243,11 +249,15 @@ impl BladesApp {
                     ui.label(
                         RichText::new(format!("{n} {}", if v { "1" } else { "0" }))
                             .monospace()
-                            .color(if v {
-                                Color32::from_rgb(81, 200, 169)
-                            } else {
-                                Color32::GRAY
-                            }),
+                            .color(
+                                if self.cpu.changed_registers.contains(&"FLAGS".to_string()) {
+                                    Color32::LIGHT_GREEN
+                                } else if v {
+                                    Color32::from_rgb(81, 200, 169)
+                                } else {
+                                    Color32::GRAY
+                                },
+                            ),
                     );
                 }
             });
@@ -438,9 +448,15 @@ impl eframe::App for BladesApp {
                     .clicked()
                 {
                     self.running = false;
-                    if let Err(e) = self.cpu.step() {
-                        self.error = Some(e.clone());
-                        self.message = e;
+                    match self.cpu.step() {
+                        Ok(instruction) => {
+                            self.message = format!("Step · {instruction}");
+                            self.error = None;
+                        }
+                        Err(e) => {
+                            self.error = Some(e.clone());
+                            self.message = e;
+                        }
                     }
                 }
                 if ui.button("Stop").clicked() {
@@ -522,6 +538,17 @@ impl eframe::App for BladesApp {
                 ui.horizontal(|ui| {
                     ui.heading("Assembly source");
                     ui.label(RichText::new(".asm").monospace().color(Color32::GRAY));
+                    if let Some((line, _)) = self
+                        .line_addresses
+                        .iter()
+                        .find(|(_, address)| *address == self.cpu.pc)
+                    {
+                        ui.label(
+                            RichText::new(format!("PC → line {line}"))
+                                .monospace()
+                                .color(Color32::LIGHT_GREEN),
+                        );
+                    }
                 });
                 ui.separator();
                 egui::ScrollArea::both().show(ui, |ui| {
@@ -553,13 +580,17 @@ impl eframe::App for BladesApp {
                                     .map(String::as_str)
                                     .unwrap_or("")
                                     .trim();
-                                if ui
-                                    .checkbox(
-                                        &mut enabled,
-                                        format!("L{line:03} · {address:04X}  {text}"),
-                                    )
-                                    .changed()
-                                {
+                                let current = *address == self.cpu.pc;
+                                let label = RichText::new(format!(
+                                    "{} L{line:03} · {address:04X}  {text}",
+                                    if current { "▶" } else { " " }
+                                ))
+                                .color(if current {
+                                    Color32::LIGHT_GREEN
+                                } else {
+                                    Color32::WHITE
+                                });
+                                if ui.checkbox(&mut enabled, label).changed() {
                                     if enabled {
                                         self.cpu.breakpoints.push(*address);
                                     } else {
