@@ -21,6 +21,7 @@ Aplicação desktop para montar, executar e depurar programas Assembly em uma CP
 - Run, Pause, Stop, Reset, Step e velocidade configurável. A execução contínua é limitada por quadro para manter a janela responsiva.
 - Breakpoints por endereço e por linha Assembly.
 - Painéis de registradores, flags, PC/SP/IR, ALU, barramentos, RAM hexadecimal, edição manual de bytes, stack e trilha de execução com deltas de estado.
+- Diagrama ao vivo do datapath BLADE-16 com PC, RAM, IR, controle, banco de registradores, ALU, flags, stack e barramentos; realça os blocos alterados durante a execução.
 - Console com eventos de montagem, execução, breakpoints, alterações de memória e erros; histórico limitado aos 500 eventos mais recentes.
 - Exemplos para aritmética, calculadora, Fibonacci, fatorial, memória, sub-rotinas e interrupções.
 

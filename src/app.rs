@@ -124,6 +124,187 @@ impl BladesApp {
         let line = self.line_addresses.iter().find(|(_, pc)| *pc == address)?.0;
         Some((line, self.source_lines.get(line.saturating_sub(1))?.trim()))
     }
+    fn architecture_view(ui: &mut egui::Ui, cpu: &Cpu) {
+        let width = ui.available_width().max(520.0);
+        let height = 174.0;
+        let (area, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        let painter = ui.painter_at(area);
+        let active_color = Color32::from_rgb(41, 157, 185);
+        let idle_color = Color32::from_rgb(49, 62, 76);
+        let box_fill = Color32::from_rgb(24, 31, 41);
+        let bus_y = area.top() + height * 0.51;
+        let box_h = 43.0;
+        let box_w = width * 0.19;
+        let top_y = area.top() + 3.0;
+        let bottom_y = area.bottom() - box_h - 2.0;
+        let positions = [
+            (
+                0.02,
+                top_y,
+                box_w,
+                "PROGRAM COUNTER",
+                format!("PC  {:04X}", cpu.pc),
+                cpu.changed_registers.iter().any(|x| x == "PC"),
+            ),
+            (
+                0.25,
+                top_y,
+                box_w,
+                "RAM · 64 KiB",
+                format!("M[PC]  {:02X}", cpu.memory[cpu.pc as usize]),
+                cpu.cycles > 0,
+            ),
+            (
+                0.49,
+                top_y,
+                box_w,
+                "INSTRUCTION REG",
+                format!("IR  {:04X}", cpu.ir),
+                cpu.changed_registers.iter().any(|x| x == "IR"),
+            ),
+            (
+                0.75,
+                top_y,
+                width * 0.23,
+                "CONTROL UNIT",
+                if cpu.cycles == 0 {
+                    "READY · sequential".into()
+                } else {
+                    format!("SEQUENTIAL · cycle {}", cpu.cycles)
+                },
+                cpu.cycles > 0,
+            ),
+            (
+                0.02,
+                bottom_y,
+                width * 0.25,
+                "REGISTER FILE",
+                format!("R0–R7 · {:04X}", cpu.r[0]),
+                cpu.changed_registers.iter().any(|x| x.starts_with('R')),
+            ),
+            (
+                0.31,
+                bottom_y,
+                width * 0.21,
+                "ALU · 16 BIT",
+                if cpu.last_instruction == "—" {
+                    "idle".into()
+                } else {
+                    cpu.last_instruction.clone()
+                },
+                cpu.last_instruction.starts_with("ADD")
+                    || cpu.last_instruction.starts_with("SUB")
+                    || cpu.last_instruction.starts_with("MUL")
+                    || cpu.last_instruction.starts_with("DIV")
+                    || cpu.last_instruction.starts_with("AND")
+                    || cpu.last_instruction.starts_with("OR")
+                    || cpu.last_instruction.starts_with("XOR")
+                    || cpu.last_instruction.starts_with("NOT")
+                    || cpu.last_instruction.starts_with("SHL")
+                    || cpu.last_instruction.starts_with("SHR")
+                    || cpu.last_instruction.starts_with("CMP")
+                    || cpu.last_instruction.starts_with("INC")
+                    || cpu.last_instruction.starts_with("DEC"),
+            ),
+            (
+                0.57,
+                bottom_y,
+                width * 0.17,
+                "FLAGS",
+                format!(
+                    "Z{} C{} N{} V{}",
+                    cpu.flags.z as u8, cpu.flags.c as u8, cpu.flags.n as u8, cpu.flags.v as u8
+                ),
+                cpu.changed_registers.iter().any(|x| x == "FLAGS"),
+            ),
+            (
+                0.79,
+                bottom_y,
+                width * 0.19,
+                "STACK",
+                format!("SP  {:04X}", cpu.sp),
+                cpu.changed_registers.iter().any(|x| x == "SP"),
+            ),
+        ];
+        let centers: Vec<f32> = positions
+            .iter()
+            .map(|(x, _, w, ..)| area.left() + width * x + width * w / 2.0)
+            .collect();
+        let top_mid = top_y + box_h;
+        let bottom_mid = bottom_y;
+        for (from, to, y) in [
+            (0, 1, top_mid - 4.0),
+            (1, 2, top_mid - 4.0),
+            (2, 3, top_mid - 4.0),
+            (4, 5, bottom_mid + 4.0),
+            (5, 6, bottom_mid + 4.0),
+        ] {
+            painter.line_segment(
+                [
+                    egui::pos2(
+                        area.left() + width * (positions[from].0 + positions[from].2),
+                        y,
+                    ),
+                    egui::pos2(area.left() + width * positions[to].0, y),
+                ],
+                Stroke::new(1.3_f32, Color32::from_rgb(83, 133, 157)),
+            );
+        }
+        painter.line_segment(
+            [
+                egui::pos2(area.left() + 8.0, bus_y),
+                egui::pos2(area.right() - 8.0, bus_y),
+            ],
+            Stroke::new(1.0_f32, Color32::from_rgb(56, 102, 125)),
+        );
+        painter.text(
+            egui::pos2(area.center().x, bus_y - 2.0),
+            egui::Align2::CENTER_BOTTOM,
+            "DATA BUS · 16 BIT     /     ADDRESS BUS · 16 BIT",
+            egui::FontId::monospace(9.0),
+            Color32::from_rgb(122, 163, 182),
+        );
+        for (i, (x, y, w, title, value, active)) in positions.iter().enumerate() {
+            let min = egui::pos2(area.left() + width * x, *y);
+            let rect = egui::Rect::from_min_size(min, egui::vec2(width * w, box_h));
+            let stroke = Stroke::new(
+                if *active { 1.6_f32 } else { 1.0_f32 },
+                if *active { active_color } else { idle_color },
+            );
+            painter.rect_filled(rect, 5.0, box_fill);
+            painter.rect_stroke(rect, 5.0, stroke, egui::StrokeKind::Outside);
+            painter.text(
+                egui::pos2(rect.center().x, rect.top() + 13.0),
+                egui::Align2::CENTER_CENTER,
+                *title,
+                egui::FontId::proportional(9.0),
+                if *active {
+                    Color32::from_rgb(105, 204, 224)
+                } else {
+                    Color32::from_rgb(142, 161, 180)
+                },
+            );
+            painter.text(
+                egui::pos2(rect.center().x, rect.top() + 30.0),
+                egui::Align2::CENTER_CENTER,
+                value,
+                egui::FontId::monospace(10.0),
+                Color32::from_rgb(224, 232, 239),
+            );
+            let cx = centers[i];
+            if i < 4 {
+                painter.line_segment(
+                    [egui::pos2(cx, rect.bottom()), egui::pos2(cx, bus_y - 14.0)],
+                    Stroke::new(0.8_f32, idle_color),
+                );
+            } else {
+                painter.line_segment(
+                    [egui::pos2(cx, bus_y + 14.0), egui::pos2(cx, rect.top())],
+                    Stroke::new(0.8_f32, idle_color),
+                );
+            }
+        }
+    }
     fn next_source_at(&self, address: u16) -> Option<(usize, &str, u16)> {
         let (_, next_address) = self
             .line_addresses
@@ -891,6 +1072,8 @@ impl eframe::App for BladesApp {
                     );
                 });
             });
+            ui.add_space(8.0);
+            Self::card(ui, "BLADE-16 · live datapath", |ui| Self::architecture_view(ui, &self.cpu));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.heading("Execution trace");
