@@ -42,7 +42,7 @@ Os resultados aritméticos são de 16 bits. DIV é unsigned; divisão por zero e
 ## Requisitos
 
 - Rust stable e Cargo.
-- Windows 11 é o alvo inicial. O projeto também habilita backends X11/Wayland do eframe, mas Linux ainda não foi validado nesta entrega.
+- Windows 11 é o alvo principal. O CI compila e testa também em Ubuntu Linux com X11/Wayland habilitados; a execução gráfica Linux ainda requer validação manual em uma sessão desktop.
 
 ## Compilar, testar e executar
 
@@ -55,7 +55,17 @@ cargo build --release
 cargo run --release
 ```
 
-O workflow de CI compila e executa a suíte de testes em Windows a cada push e pull request.
+O workflow de CI verifica formatação, executa testes e compila os binários em Windows e Linux a cada push e pull request.
+
+## Pacote portátil para Windows
+
+Para gerar um `.zip` executável com o aplicativo, documentação e exemplos:
+
+```powershell
+.\scripts\package-windows.ps1
+```
+
+O arquivo é criado em `dist/`. O GitHub Actions também publica o pacote como artefato baixável em cada execução de CI bem-sucedida.
 
 ## Fluxo rápido
 
