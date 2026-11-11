@@ -438,6 +438,23 @@ mod tests {
         assert!(c.halted);
     }
     #[test]
+    fn signed_overflow_and_conditional_branches_are_consistent() {
+        let p = assemble(
+            "MOV R0, 65535\nMOV R1, 1\nADD R0, R1\nJC carry\nMOV R2, 0\nJMP after_carry\ncarry: MOV R2, 1\nafter_carry: CMP R2, R2\nJZ equal\nMOV R5, 0\nJMP finish\nequal: MOV R5, 1\nfinish: MOV R3, 32767\nMOV R4, 1\nADD R3, R4\nHLT",
+        )
+        .unwrap();
+        let mut c = Cpu::new();
+        c.load(&p.bytes, &p.vectors);
+        c.run_batch(30).unwrap();
+        assert!(c.halted);
+        assert_eq!(c.r[0], 0);
+        assert!(c.flags.n);
+        assert!(c.flags.v);
+        assert_eq!(c.r[2], 1);
+        assert_eq!(c.r[3], 0x8000);
+        assert_eq!(c.r[5], 1);
+    }
+    #[test]
     fn executes_stack_and_subroutine() {
         let p = assemble(
             "MOV R0, 5\nCALL DOUBLE\nHLT\nDOUBLE:\nPUSH R1\nMOV R1, R0\nADD R0, R1\nPOP R1\nRET",

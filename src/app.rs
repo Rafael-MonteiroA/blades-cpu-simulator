@@ -8,6 +8,14 @@ use eframe::egui::{
 };
 use std::collections::VecDeque;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemoryFormat {
+    Hex,
+    Decimal,
+    Binary,
+    Ascii,
+}
+
 pub struct BladesApp {
     cpu: Cpu,
     source: String,
@@ -24,6 +32,8 @@ pub struct BladesApp {
     line_addresses: Vec<(usize, u16)>,
     error: Option<String>,
     show_memory: bool,
+    memory_format: MemoryFormat,
+    program_bytes: usize,
     console: VecDeque<String>,
 }
 impl BladesApp {
@@ -52,6 +62,8 @@ impl BladesApp {
             line_addresses: vec![],
             error: None,
             show_memory: true,
+            memory_format: MemoryFormat::Hex,
+            program_bytes: 0,
             console: VecDeque::new(),
         }
     }
@@ -61,6 +73,7 @@ impl BladesApp {
                 let breakpoints = self.cpu.breakpoints.clone();
                 self.cpu.load(&p.bytes, &p.vectors);
                 self.cpu.breakpoints = breakpoints;
+                self.program_bytes = p.bytes.len();
                 self.source_lines = p.lines;
                 self.line_addresses = p.line_addresses;
                 self.assembled = true;
@@ -497,6 +510,21 @@ impl BladesApp {
     fn memory(&mut self, ui: &mut egui::Ui) {
         Self::card(ui, "Memory · 64 KiB", |ui| {
             ui.horizontal(|ui| {
+                for (label, format) in [
+                    ("HEX", MemoryFormat::Hex),
+                    ("DEC", MemoryFormat::Decimal),
+                    ("BIN", MemoryFormat::Binary),
+                    ("ASCII", MemoryFormat::Ascii),
+                ] {
+                    if ui
+                        .selectable_label(self.memory_format == format, label)
+                        .clicked()
+                    {
+                        self.memory_format = format;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
                 ui.label("Base address");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.memory_address)
@@ -536,60 +564,85 @@ impl BladesApp {
                     }
                 }
             });
+            let code_end = ENTRY as usize + self.program_bytes;
+            let code_region = if self.program_bytes == 0 {
+                "not assembled".to_string()
+            } else {
+                format!(
+                    "0200–{:04X}",
+                    code_end.saturating_sub(1).min(u16::MAX as usize)
+                )
+            };
+            ui.label(
+                RichText::new(format!(
+                    "MAP  vectors 0000–01FF   ·   code {code_region}   ·   stack ↓ from FFFE"
+                ))
+                .size(9.0)
+                .color(Color32::from_rgb(130, 150, 169)),
+            );
             let base = u16::from_str_radix(self.memory_address.trim_start_matches("0x"), 16)
                 .unwrap_or(ENTRY)
                 & !0x0f;
-            egui::ScrollArea::vertical()
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    egui::Grid::new("memory")
-                        .striped(true)
-                        .spacing([8.0, 3.0])
-                        .show(ui, |ui| {
-                            ui.label("ADDR");
-                            for i in 0..16 {
-                                ui.label(RichText::new(format!("{i:X}")).monospace().size(10.0));
-                            }
+            egui::ScrollArea::both().max_height(220.0).show(ui, |ui| {
+                egui::Grid::new("memory")
+                    .striped(true)
+                    .spacing([8.0, 3.0])
+                    .show(ui, |ui| {
+                        ui.label("ADDR");
+                        for i in 0..16 {
+                            ui.label(RichText::new(format!("{i:X}")).monospace().size(10.0));
+                        }
+                        if self.memory_format != MemoryFormat::Ascii {
                             ui.label("ASCII");
-                            ui.end_row();
-                            for row in 0..12u16 {
-                                let addr = base.wrapping_add(row * 16);
-                                ui.label(
-                                    RichText::new(format!("{addr:04X}"))
-                                        .monospace()
-                                        .color(Color32::GRAY),
-                                );
-                                let mut ascii = String::new();
-                                for col in 0..16u16 {
-                                    let v = self.cpu.memory[addr.wrapping_add(col) as usize];
-                                    ui.label(
-                                        RichText::new(format!("{v:02X}"))
-                                            .monospace()
-                                            .size(10.5)
-                                            .color(
-                                                if self
-                                                    .cpu
-                                                    .changed_memory
-                                                    .contains(&addr.wrapping_add(col))
-                                                {
-                                                    Color32::LIGHT_GREEN
-                                                } else {
-                                                    Color32::from_rgb(200, 210, 220)
-                                                },
-                                            ),
-                                    );
-                                    ascii.push(if v.is_ascii_graphic() { v as char } else { '.' });
+                        }
+                        ui.end_row();
+                        for row in 0..12u16 {
+                            let addr = base.wrapping_add(row * 16);
+                            ui.label(
+                                RichText::new(format!("{addr:04X}"))
+                                    .monospace()
+                                    .color(Color32::GRAY),
+                            );
+                            let mut ascii = String::new();
+                            for col in 0..16u16 {
+                                let v = self.cpu.memory[addr.wrapping_add(col) as usize];
+                                ascii.push(if v.is_ascii_graphic() { v as char } else { '.' });
+                                if self.memory_format != MemoryFormat::Ascii {
+                                    let value = match self.memory_format {
+                                        MemoryFormat::Hex => format!("{v:02X}"),
+                                        MemoryFormat::Decimal => format!("{v:03}"),
+                                        MemoryFormat::Binary => format!("{v:08b}"),
+                                        MemoryFormat::Ascii => (v as char).to_string(),
+                                    };
+                                    ui.label(RichText::new(value).monospace().size(10.5).color(
+                                        if self.cpu.changed_memory.contains(&addr.wrapping_add(col))
+                                        {
+                                            Color32::LIGHT_GREEN
+                                        } else {
+                                            Color32::from_rgb(200, 210, 220)
+                                        },
+                                    ));
                                 }
+                            }
+                            if self.memory_format == MemoryFormat::Ascii {
+                                ui.label(
+                                    RichText::new(ascii)
+                                        .monospace()
+                                        .size(10.0)
+                                        .color(Color32::from_rgb(200, 210, 220)),
+                                );
+                            } else {
                                 ui.label(
                                     RichText::new(ascii)
                                         .monospace()
                                         .size(10.0)
                                         .color(Color32::GRAY),
                                 );
-                                ui.end_row();
                             }
-                        });
-                });
+                            ui.end_row();
+                        }
+                    });
+            });
         });
     }
 }
