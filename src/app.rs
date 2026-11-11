@@ -96,15 +96,38 @@ impl BladesApp {
     fn mono(s: impl Into<String>) -> RichText {
         RichText::new(s.into()).monospace()
     }
+    fn pc_source_line(&self) -> Option<usize> {
+        if !self.assembled || self.source.trim_end_matches('\n') != self.source_lines.join("\n") {
+            return None;
+        }
+        self.line_addresses
+            .iter()
+            .find(|(_, address)| *address == self.cpu.pc)
+            .map(|(line, _)| *line)
+    }
+    fn source_at(&self, address: u16) -> Option<(usize, &str)> {
+        let line = self.line_addresses.iter().find(|(_, pc)| *pc == address)?.0;
+        Some((line, self.source_lines.get(line.saturating_sub(1))?.trim()))
+    }
+    fn next_source_at(&self, address: u16) -> Option<(usize, &str, u16)> {
+        let (_, next_address) = self
+            .line_addresses
+            .iter()
+            .filter(|(_, pc)| *pc > address)
+            .min_by_key(|(_, pc)| *pc)?;
+        let (line, text) = self.source_at(*next_address)?;
+        Some((line, text, *next_address))
+    }
     fn assembly_layout(
         ui: &egui::Ui,
         source: &str,
         wrap_width: f32,
+        highlighted_line: Option<usize>,
     ) -> std::sync::Arc<egui::Galley> {
         let mut job = LayoutJob::default();
         job.wrap.max_width = wrap_width;
         let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-        for line in source.split_inclusive('\n') {
+        for (line_number, line) in source.split_inclusive('\n').enumerate() {
             let mut i = 0;
             while i < line.len() {
                 let ch = line[i..].chars().next().unwrap_or(' ');
@@ -189,6 +212,11 @@ impl BladesApp {
                     TextFormat {
                         font_id: font_id.clone(),
                         color,
+                        background: if highlighted_line == Some(line_number + 1) {
+                            Color32::from_rgb(31, 59, 73)
+                        } else {
+                            Color32::TRANSPARENT
+                        },
                         ..Default::default()
                     },
                 );
@@ -578,11 +606,7 @@ impl eframe::App for BladesApp {
                 ui.horizontal(|ui| {
                     ui.heading("Assembly source");
                     ui.label(RichText::new(".asm").monospace().color(Color32::GRAY));
-                    if let Some((line, _)) = self
-                        .line_addresses
-                        .iter()
-                        .find(|(_, address)| *address == self.cpu.pc)
-                    {
+                    if let Some(line) = self.pc_source_line() {
                         ui.label(
                             RichText::new(format!("PC → line {line}"))
                                 .monospace()
@@ -591,9 +615,10 @@ impl eframe::App for BladesApp {
                     }
                 });
                 ui.separator();
+                let current_line = self.pc_source_line();
                 egui::ScrollArea::both().show(ui, |ui| {
                     let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-                        Self::assembly_layout(ui, text, wrap_width)
+                        Self::assembly_layout(ui, text, wrap_width, current_line)
                     };
                     ui.add(
                         egui::TextEdit::multiline(&mut self.source)
@@ -734,20 +759,55 @@ impl eframe::App for BladesApp {
             ui.columns(2, |cols| {
                 Self::card(&mut cols[0], "Instruction state", |ui| {
                     ui.label(
-                        RichText::new("LAST EXECUTED")
+                        RichText::new("PREVIOUS · RETIRED")
                             .size(10.0)
                             .color(Color32::GRAY),
                     );
                     ui.label(
                         RichText::new(if self.cpu.last_instruction == "—" {
-                            "Awaiting instruction"
+                            "—"
                         } else {
                             &self.cpu.last_instruction
                         })
                         .monospace()
-                        .size(16.0)
-                        .color(Color32::from_rgb(96, 211, 232)),
+                        .color(Color32::from_rgb(147, 165, 182)),
                     );
+                    ui.label(
+                        RichText::new("CURRENT · PC")
+                            .size(10.0)
+                            .color(Color32::GRAY),
+                    );
+                    if let Some((line, text)) = self.source_at(self.cpu.pc) {
+                        ui.label(
+                            RichText::new(format!(
+                                "{self_pc:04X}  L{line:03}  {text}",
+                                self_pc = self.cpu.pc
+                            ))
+                            .monospace()
+                            .strong()
+                            .color(Color32::from_rgb(96, 211, 232)),
+                        );
+                    } else {
+                        ui.label(
+                            RichText::new(format!("{:04X}  —", self.cpu.pc))
+                                .monospace()
+                                .color(Color32::GRAY),
+                        );
+                    }
+                    ui.label(
+                        RichText::new("NEXT · SEQUENTIAL ADDRESS")
+                            .size(10.0)
+                            .color(Color32::GRAY),
+                    );
+                    if let Some((line, text, address)) = self.next_source_at(self.cpu.pc) {
+                        ui.label(
+                            RichText::new(format!("{address:04X}  L{line:03}  {text}"))
+                                .monospace()
+                                .color(Color32::from_rgb(180, 193, 207)),
+                        );
+                    } else {
+                        ui.label(RichText::new("—").monospace().color(Color32::GRAY));
+                    }
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("FETCH");
