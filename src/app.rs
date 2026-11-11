@@ -16,6 +16,12 @@ enum MemoryFormat {
     Ascii,
 }
 
+#[derive(Clone, Copy)]
+enum PendingSourceAction {
+    New,
+    Open,
+}
+
 pub struct BladesApp {
     cpu: Cpu,
     source: String,
@@ -26,6 +32,8 @@ pub struct BladesApp {
     memory_address: String,
     breakpoint_address: String,
     file_path: String,
+    saved_source: String,
+    pending_source_action: Option<PendingSourceAction>,
     memory_edit_address: String,
     memory_edit_value: String,
     source_lines: Vec<String>,
@@ -56,6 +64,8 @@ impl BladesApp {
             memory_address: "0200".into(),
             breakpoint_address: "0200".into(),
             file_path: String::new(),
+            saved_source: include_str!("../examples/hello.asm").into(),
+            pending_source_action: None,
             memory_edit_address: "4000".into(),
             memory_edit_value: "00".into(),
             source_lines: vec![],
@@ -139,6 +149,51 @@ impl BladesApp {
     }
     fn source_ready(&self) -> bool {
         self.assembled && self.source.trim_end_matches('\n') == self.source_lines.join("\n")
+    }
+    fn source_dirty(&self) -> bool {
+        self.source != self.saved_source
+    }
+    fn new_source(&mut self) {
+        self.source.clear();
+        self.saved_source.clear();
+        self.file_path.clear();
+        self.source_lines.clear();
+        self.line_addresses.clear();
+        self.program_bytes = 0;
+        self.assembled = false;
+        self.running = false;
+        self.error = None;
+        self.cpu.reset();
+        self.message = "Novo arquivo Assembly".into();
+        self.log("INFO", "Novo arquivo Assembly criado");
+    }
+    fn open_source_dialog(&mut self) {
+        let mut dialog = rfd::FileDialog::new().add_filter("Assembly", &["asm"]);
+        if let Some(parent) = std::path::Path::new(&self.file_path)
+            .parent()
+            .filter(|p| p.exists())
+        {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(path) = dialog.pick_file() {
+            match std::fs::read_to_string(&path) {
+                Ok(text) => {
+                    self.file_path = path.display().to_string();
+                    self.source = text;
+                    self.saved_source = self.source.clone();
+                    self.assembled = false;
+                    self.running = false;
+                    self.message = format!("Arquivo carregado: {}", self.file_path);
+                    self.error = None;
+                    self.log("INFO", self.message.clone());
+                }
+                Err(e) => {
+                    self.error = Some(e.to_string());
+                    self.message = format!("Falha ao abrir arquivo: {e}");
+                    self.log("ERROR", self.message.clone());
+                }
+            }
+        }
     }
     fn source_at(&self, address: u16) -> Option<(usize, &str)> {
         let line = self.line_addresses.iter().find(|(_, pc)| *pc == address)?.0;
@@ -691,31 +746,25 @@ impl eframe::App for BladesApp {
                         .desired_width(150.0)
                         .hint_text("unsaved program.asm"),
                 );
-                if ui.button("Open").clicked() {
-                    let mut dialog = rfd::FileDialog::new().add_filter("Assembly", &["asm"]);
-                    if let Some(parent) = std::path::Path::new(&self.file_path)
-                        .parent()
-                        .filter(|p| p.exists())
-                    {
-                        dialog = dialog.set_directory(parent);
+                if self.source_dirty() {
+                    ui.label(
+                        RichText::new("● MODIFIED")
+                            .size(9.0)
+                            .color(Color32::from_rgb(231, 176, 92)),
+                    );
+                }
+                if ui.button("New").clicked() {
+                    if self.source_dirty() {
+                        self.pending_source_action = Some(PendingSourceAction::New);
+                    } else {
+                        self.new_source();
                     }
-                    if let Some(path) = dialog.pick_file() {
-                        self.file_path = path.display().to_string();
-                        match std::fs::read_to_string(&path) {
-                            Ok(text) => {
-                                self.source = text;
-                                self.assembled = false;
-                                self.running = false;
-                                self.message = format!("Arquivo carregado: {}", self.file_path);
-                                self.error = None;
-                                self.log("INFO", self.message.clone());
-                            }
-                            Err(e) => {
-                                self.error = Some(e.to_string());
-                                self.message = format!("Falha ao abrir arquivo: {e}");
-                                self.log("ERROR", self.message.clone());
-                            }
-                        }
+                }
+                if ui.button("Open").clicked() {
+                    if self.source_dirty() {
+                        self.pending_source_action = Some(PendingSourceAction::Open);
+                    } else {
+                        self.open_source_dialog();
                     }
                 }
                 if ui.button("Save").clicked() {
@@ -731,6 +780,7 @@ impl eframe::App for BladesApp {
                         self.file_path = path.display().to_string();
                         match std::fs::write(&path, &self.source) {
                             Ok(()) => {
+                                self.saved_source = self.source.clone();
                                 self.message = format!("Arquivo salvo: {}", self.file_path);
                                 self.error = None;
                                 self.log("INFO", self.message.clone());
@@ -752,6 +802,7 @@ impl eframe::App for BladesApp {
                         self.file_path = path.display().to_string();
                         match std::fs::write(&path, &self.source) {
                             Ok(()) => {
+                                self.saved_source = self.source.clone();
                                 self.message = format!("Arquivo salvo: {}", self.file_path);
                                 self.error = None;
                                 self.log("INFO", self.message.clone());
@@ -1287,5 +1338,39 @@ impl eframe::App for BladesApp {
                 self.memory(ui)
             }
         });
+
+        if let Some(action) = self.pending_source_action {
+            let mut discard = false;
+            let mut cancel = false;
+            egui::Modal::new(egui::Id::new("unsaved_source_modal")).show(ctx, |ui| {
+                ui.set_min_width(340.0);
+                ui.heading("Unsaved Assembly changes");
+                ui.label("Save the current source first, or discard its edits to continue.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if ui
+                        .button(match action {
+                            PendingSourceAction::New => "Discard and create new",
+                            PendingSourceAction::Open => "Discard and open file",
+                        })
+                        .clicked()
+                    {
+                        discard = true;
+                    }
+                });
+            });
+            if cancel {
+                self.pending_source_action = None;
+            } else if discard {
+                self.pending_source_action = None;
+                self.new_source();
+                if matches!(action, PendingSourceAction::Open) {
+                    self.open_source_dialog();
+                }
+            }
+        }
     }
 }

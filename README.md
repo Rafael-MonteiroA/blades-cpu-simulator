@@ -15,7 +15,7 @@ Aplicação desktop para montar, executar e depurar programas Assembly em uma CP
 
 - Editor Assembly com gutter numérico, breakpoints clicáveis por linha e realce de instruções, registradores, labels, diretivas, literais e comentários.
 - Destaque visual da linha correspondente ao PC e monitor com instrução anterior, atual e próximo endereço sequencial.
-- Abrir arquivos `.asm` por diálogo nativo; salvar por diálogo **Save As** ou pelo caminho digitado.
+- Criar um Assembly novo, abrir arquivos `.asm` por diálogo nativo e salvar por diálogo **Save As** ou pelo caminho digitado; alterações pendentes são identificadas e protegidas antes de substituir a fonte.
 - Montagem de duas passagens, resolução de labels, comentários com `;`, operandos decimais/hexadecimais e erros com linha.
 - Diretivas `.ORG`, `.BYTE`, `.WORD` e `.VECTOR`.
 - Run, Pause, Stop, Reset, Step e velocidade configurável. A execução contínua é limitada por quadro para manter a janela responsiva.
