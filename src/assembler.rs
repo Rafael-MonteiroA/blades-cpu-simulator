@@ -1,5 +1,5 @@
 use crate::cpu::ENTRY;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,23 +32,65 @@ fn value(s: &str, labels: &HashMap<String, u16>, line: usize) -> Result<u16, Asm
     if let Some(v) = labels.get(&s.to_uppercase()) {
         return Ok(*v);
     }
-    let n = if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u16::from_str_radix(x, 16)
-    } else if let Some(x) = s.strip_suffix('h').or_else(|| s.strip_suffix('H')) {
-        u16::from_str_radix(x, 16)
-    } else {
-        s.parse::<u16>()
-    };
-    n.map_err(|_| AsmError {
+    let n = parse_number(s).map_err(|_| AsmError {
         line,
         message: format!("valor ou label inválido: {s}"),
-    })
+    })?;
+    if !(-32768..=65535).contains(&n) {
+        return Err(AsmError {
+            line,
+            message: format!("valor fora da faixa de 16 bits: {s}"),
+        });
+    }
+    Ok(n as u16)
+}
+fn parse_number(s: &str) -> Result<i32, ()> {
+    let (negative, unsigned) = s.strip_prefix('-').map_or((false, s), |x| (true, x));
+    let parsed = if let Some(x) = unsigned
+        .strip_prefix("0x")
+        .or_else(|| unsigned.strip_prefix("0X"))
+    {
+        i32::from_str_radix(x, 16)
+    } else if let Some(x) = unsigned
+        .strip_suffix('h')
+        .or_else(|| unsigned.strip_suffix('H'))
+    {
+        i32::from_str_radix(x, 16)
+    } else {
+        unsigned.parse::<i32>()
+    }
+    .map_err(|_| ())?;
+    Ok(if negative { -parsed } else { parsed })
+}
+fn byte_value(s: &str, labels: &HashMap<String, u16>, line: usize) -> Result<u8, AsmError> {
+    let raw = labels
+        .get(&s.trim().to_uppercase())
+        .map(|v| *v as i32)
+        .or_else(|| parse_number(s.trim()).ok())
+        .ok_or_else(|| AsmError {
+            line,
+            message: format!("byte inválido: {s}"),
+        })?;
+    if !(-128..=255).contains(&raw) {
+        return Err(AsmError {
+            line,
+            message: format!(".BYTE fora da faixa -128..255: {s}"),
+        });
+    }
+    Ok(raw as u8)
 }
 fn split_ops(s: &str) -> Vec<String> {
-    s.split(',')
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty())
-        .collect()
+    if s.trim().is_empty() {
+        return Vec::new();
+    }
+    s.split(',').map(|x| x.trim().to_string()).collect()
+}
+fn valid_label(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 fn size(code: &str, line: usize) -> Result<usize, AsmError> {
     let mut s = code.trim();
@@ -85,6 +127,32 @@ fn size(code: &str, line: usize) -> Result<usize, AsmError> {
             });
         }
     };
+    let expected = match m.as_str() {
+        "NOP" | "HLT" | "RET" | "IRET" => Some(0),
+        "PUSH" | "POP" | "NOT" | "INC" | "DEC" => Some(1),
+        "MOV" | "LOAD" | "STORE" | "ADD" | "SUB" | "MUL" | "DIV" | "AND" | "OR" | "XOR" | "CMP"
+        | "SHL" | "SHR" | ".VECTOR" => Some(2),
+        "JMP" | "JZ" | "JNZ" | "JC" | "JNC" | "CALL" | "INT" => Some(1),
+        ".ORG" => Some(1),
+        ".BYTE" | ".WORD" => {
+            if o.is_empty() {
+                return Err(AsmError {
+                    line,
+                    message: format!("{m} requer pelo menos um valor"),
+                });
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(count) = expected {
+        if o.len() != count {
+            return Err(AsmError {
+                line,
+                message: format!("{m} requer {count} operando(s), recebeu {}", o.len()),
+            });
+        }
+    }
     Ok(n)
 }
 pub fn assemble(source: &str) -> Result<Program, AsmError> {
@@ -99,7 +167,7 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
         let mut body = code;
         if let Some((label, rest)) = code.split_once(':') {
             let l = label.trim().to_uppercase();
-            if l.is_empty() || labels.insert(l.clone(), pc as u16).is_some() {
+            if !valid_label(&l) || labels.insert(l.clone(), pc as u16).is_some() {
                 return Err(AsmError {
                     line,
                     message: format!("label duplicada ou vazia: {l}"),
@@ -112,10 +180,29 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
         }
         let (m, r) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
         if m.eq_ignore_ascii_case(".ORG") {
-            pc = value(r, &labels, line)? as usize;
+            if split_ops(r).len() != 1 {
+                return Err(AsmError {
+                    line,
+                    message: ".ORG requer um endereço".into(),
+                });
+            }
+            let target = value(r, &labels, line)? as usize;
+            if target < ENTRY as usize || target < pc {
+                return Err(AsmError {
+                    line,
+                    message: ".ORG deve avançar dentro da área de programa".into(),
+                });
+            }
+            pc = target;
             continue;
         }
         if m.eq_ignore_ascii_case(".VECTOR") {
+            if split_ops(r).len() != 2 {
+                return Err(AsmError {
+                    line,
+                    message: ".VECTOR requer número e label/endereço".into(),
+                });
+            }
             continue;
         }
         pc = pc
@@ -128,6 +215,7 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
     }
     let mut bytes = Vec::new();
     let mut vectors = Vec::new();
+    let mut vector_numbers = HashSet::new();
     let mut line_addresses = Vec::new();
     let mut pc = ENTRY;
     for (idx, raw) in source.lines().enumerate() {
@@ -145,10 +233,10 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
         let o = split_ops(rest);
         if m == ".ORG" {
             let target = value(rest, &labels, line)?;
-            if (target as usize) < ENTRY as usize {
+            if (target as usize) < ENTRY as usize || target < pc {
                 return Err(AsmError {
                     line,
-                    message: ".ORG antes da área de programa".into(),
+                    message: ".ORG deve avançar dentro da área de programa".into(),
                 });
             }
             while pc < target {
@@ -171,6 +259,12 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
                     message: "número do vetor deve estar entre 0 e 255".into(),
                 });
             }
+            if !vector_numbers.insert(number as u8) {
+                return Err(AsmError {
+                    line,
+                    message: format!("vetor {number} definido mais de uma vez"),
+                });
+            }
             vectors.push((number as u8, value(&o[1], &labels, line)?));
             continue;
         }
@@ -179,7 +273,7 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
         }
         if m == ".BYTE" {
             for x in o {
-                bytes.push(value(&x, &labels, line)? as u8);
+                bytes.push(byte_value(&x, &labels, line)?);
                 pc = pc.wrapping_add(1);
             }
             continue;
@@ -304,5 +398,24 @@ mod tests {
     #[test]
     fn reports_line() {
         assert!(assemble("MOV R9, 1").unwrap_err().line == 1);
+    }
+    #[test]
+    fn accepts_signed_words_and_checks_byte_range() {
+        let p = assemble("MOV R0, -1\n.BYTE -1, 255").unwrap();
+        assert_eq!(&p.bytes[2..4], &[0xff, 0xff]);
+        assert_eq!(&p.bytes[4..6], &[0xff, 0xff]);
+        assert!(assemble(".BYTE 256").unwrap_err().message.contains("faixa"));
+    }
+    #[test]
+    fn validates_arity_vectors_and_origin() {
+        assert!(assemble("NOP R0").unwrap_err().message.contains("operando"));
+        assert!(
+            assemble(".VECTOR 1, H\n.VECTOR 1, H\nH: IRET")
+                .unwrap_err()
+                .message
+                .contains("mais de uma vez")
+        );
+        assert!(assemble(".ORG 0x0300\n.ORG 0x0200").is_err());
+        assert!(assemble("1BAD: HLT").is_err());
     }
 }
