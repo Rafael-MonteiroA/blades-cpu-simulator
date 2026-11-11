@@ -27,6 +27,23 @@ fn reg(s: &str, line: usize) -> Result<u8, AsmError> {
             message: format!("registrador inválido: {s}"),
         })
 }
+fn is_indirect_register(s: &str) -> bool {
+    s.trim()
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .is_some_and(|inner| reg(inner, 0).is_ok())
+}
+fn indirect_reg(s: &str, line: usize) -> Result<u8, AsmError> {
+    let inner = s
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| AsmError {
+            line,
+            message: format!("esperado endereço indireto [Rn]: {s}"),
+        })?;
+    reg(inner, line)
+}
 fn value(s: &str, labels: &HashMap<String, u16>, line: usize) -> Result<u16, AsmError> {
     let s = s.trim().trim_matches(|c| c == '[' || c == ']');
     if let Some(v) = labels.get(&s.to_uppercase()) {
@@ -111,6 +128,18 @@ fn size(code: &str, line: usize) -> Result<usize, AsmError> {
         "PUSH" | "POP" => 2,
         "MOV" if o.len() == 2 && o[1].to_uppercase().starts_with('R') => 3,
         "MOV" => 4,
+        "LOAD"
+            if o.get(1)
+                .is_some_and(|operand| is_indirect_register(operand)) =>
+        {
+            3
+        }
+        "STORE"
+            if o.first()
+                .is_some_and(|operand| is_indirect_register(operand)) =>
+        {
+            3
+        }
         "LOAD" | "STORE" => 4,
         "ADD" | "SUB" | "MUL" | "DIV" | "AND" | "OR" | "XOR" | "CMP" => 3,
         "NOT" | "INC" | "DEC" => 2,
@@ -290,6 +319,18 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
             "HLT" => 1,
             "MOV" if o.get(1).is_some_and(|x| x.to_uppercase().starts_with('R')) => 0x11,
             "MOV" => 0x10,
+            "LOAD"
+                if o.get(1)
+                    .is_some_and(|operand| is_indirect_register(operand)) =>
+            {
+                0x16
+            }
+            "STORE"
+                if o.first()
+                    .is_some_and(|operand| is_indirect_register(operand)) =>
+            {
+                0x17
+            }
             "LOAD" => 0x12,
             "STORE" => 0x13,
             "PUSH" => 0x14,
@@ -347,6 +388,14 @@ pub fn assemble(source: &str) -> Result<Program, AsmError> {
                 let d = reg(need(0)?, line)?;
                 let s = reg(need(1)?, line)?;
                 bytes.extend([d, s]);
+                pc = pc.wrapping_add(2)
+            }
+            "LOAD" if opcode == 0x16 => {
+                bytes.extend([reg(need(0)?, line)?, indirect_reg(need(1)?, line)?]);
+                pc = pc.wrapping_add(2)
+            }
+            "STORE" if opcode == 0x17 => {
+                bytes.extend([indirect_reg(need(0)?, line)?, reg(need(1)?, line)?]);
                 pc = pc.wrapping_add(2)
             }
             "LOAD" | "STORE" => {

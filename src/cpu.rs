@@ -195,6 +195,22 @@ impl Cpu {
                 self.r[d] = v;
                 format!("POP R{d}")
             }
+            0x16 => {
+                let d = self.reg();
+                let address_reg = self.reg();
+                let address = self.r[address_reg];
+                let value = self.read_word(address);
+                self.r[d] = value;
+                self.set_zn(value);
+                format!("LOAD R{d}, [R{address_reg}]")
+            }
+            0x17 => {
+                let address_reg = self.reg();
+                let value_reg = self.reg();
+                let address = self.r[address_reg];
+                self.write_word(address, self.r[value_reg]);
+                format!("STORE [R{address_reg}], R{value_reg}")
+            }
             0x20..=0x25 => {
                 let d = self.reg();
                 let s = self.reg();
@@ -576,6 +592,18 @@ mod tests {
                 after: 0xaa,
             })
         );
+    }
+    #[test]
+    fn register_indirect_load_and_store_access_ram() {
+        let p =
+            assemble("MOV R0, 0x4000\nMOV R1, 0x1234\nSTORE [R0], R1\nLOAD R2, [R0]\nHLT").unwrap();
+        let mut c = Cpu::new();
+        c.load(&p.bytes, &p.vectors);
+        c.run_batch(10).unwrap();
+        assert!(c.halted);
+        assert_eq!(c.r[2], 0x1234);
+        assert_eq!(c.memory[0x4000], 0x34);
+        assert_eq!(c.memory[0x4001], 0x12);
     }
     #[test]
     fn interrupt_saves_and_restores_context() {

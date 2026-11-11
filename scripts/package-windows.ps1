@@ -1,5 +1,6 @@
 param(
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$CargoTargetDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,10 +8,16 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repositoryRoot "dist"
 }
+if ([string]::IsNullOrWhiteSpace($CargoTargetDirectory)) {
+    $CargoTargetDirectory = Join-Path $repositoryRoot "target"
+}
+elseif (-not [System.IO.Path]::IsPathRooted($CargoTargetDirectory)) {
+    $CargoTargetDirectory = Join-Path $repositoryRoot $CargoTargetDirectory
+}
 
 Push-Location $repositoryRoot
 try {
-    cargo build --release --locked
+    cargo build --release --locked --target-dir $CargoTargetDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed with exit code $LASTEXITCODE"
     }
@@ -27,7 +34,8 @@ try {
     New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot "target\release\blades-cpu-simulator.exe") -Destination $stagingDirectory
+    $releaseExecutable = Join-Path $CargoTargetDirectory "release\blades-cpu-simulator.exe"
+    Copy-Item -LiteralPath $releaseExecutable -Destination $stagingDirectory
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "README.md") -Destination $stagingDirectory
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "docs") -Destination $stagingDirectory -Recurse
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "examples") -Destination $stagingDirectory -Recurse

@@ -23,7 +23,7 @@ Aplicação desktop para montar, executar e depurar programas Assembly em uma CP
 - Painéis de registradores em HEX/DEC/BIN, flags, PC/SP/IR, ALU, barramentos, RAM com modos HEX/DEC/BIN/ASCII, mapa de regiões, edição de bytes, histórico de gravações com valores anterior/novo, stack e trilha com deltas de estado.
 - Diagrama ao vivo do datapath BLADE-16 com PC, RAM, IR, controle, banco de registradores, ALU, flags, stack e barramentos; realça os blocos alterados durante a execução.
 - Console com eventos de montagem, execução, breakpoints, alterações de memória e erros; histórico limitado aos 500 eventos mais recentes.
-- Exemplos para aritmética, calculadora, Fibonacci, fatorial, memória, sub-rotinas e interrupções.
+- Exemplos para aritmética, calculadora, Fibonacci, fatorial, bubble sort, memória, sub-rotinas e interrupções.
 
 ## Conjunto de instruções
 
@@ -38,6 +38,8 @@ Aplicação desktop para montar, executar e depurar programas Assembly em uma CP
 | Interrupções | `INT`, `IRET` |
 
 Os resultados aritméticos são de 16 bits. DIV é unsigned; divisão por zero e opcodes inválidos são reportados sem avançar o ciclo. A documentação detalhada das flags, formatos e efeitos está em [`docs/instruction_set.md`](docs/instruction_set.md).
+
+LOAD/STORE aceitam endereço absoluto (`LOAD R0, [0x4000]`) e indireto por registrador (`LOAD R0, [R1]`). O exemplo `examples/bubble_sort.asm` usa acesso indireto para ordenar seis words na RAM: `[9, 2, 25, 2, 7, 1]` → `[1, 2, 2, 7, 9, 25]`.
 
 ## Requisitos
 

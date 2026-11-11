@@ -40,3 +40,24 @@ fn examples_hello_subroutine_and_interrupt() {
     );
     assert_eq!(interrupt.sp, 0xfffe);
 }
+
+#[test]
+fn example_bubble_sort_orders_words_in_ram() {
+    let program =
+        assemble(include_str!("../examples/bubble_sort.asm")).expect("bubble sort should assemble");
+    let array = program.labels["ARRAY"];
+    assert_eq!(array, 0x0233);
+    let mut cpu = Cpu::new();
+    cpu.load(&program.bytes, &program.vectors);
+    cpu.run_batch(2_000).expect("bubble sort should execute");
+
+    assert!(cpu.halted, "bubble sort did not halt");
+    let sorted: Vec<u16> = (0..6)
+        .map(|index| {
+            let address = array.wrapping_add(index * 2) as usize;
+            u16::from_le_bytes([cpu.memory[address], cpu.memory[address + 1]])
+        })
+        .collect();
+    assert_eq!(sorted, [1, 2, 2, 7, 9, 25]);
+    assert!(cpu.cycles < 2_000);
+}

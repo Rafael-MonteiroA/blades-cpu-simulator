@@ -7,8 +7,10 @@ Each instruction begins with one opcode byte. Register identifiers are one byte 
 | NOP, HLT | — | no operation; stop execution |
 | MOV Rd, imm16 | reg, word | load immediate; update Z/N |
 | MOV Rd, Rs | reg, reg | copy; update Z/N |
-| LOAD Rd, [addr] | reg, word | read little-endian word; update Z/N |
-| STORE [addr], Rs | reg, word | write little-endian word |
+| LOAD Rd, [addr] | reg, word | absolute read of a little-endian word; update Z/N |
+| LOAD Rd, [Ra] (`0x16`) | reg, reg | read a little-endian word at the address held in Ra; update Z/N |
+| STORE [addr], Rs | reg, word | absolute write of a little-endian word |
+| STORE [Ra], Rs (`0x17`) | reg, reg | write a little-endian word at the address held in Ra |
 | PUSH Rs / POP Rd | reg | word stack transfer |
 | ADD/SUB/MUL/DIV/AND/OR/XOR Rd, Rs | reg, reg | result replaces Rd |
 | NOT/INC/DEC Rd | reg | unary operation |
