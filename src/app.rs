@@ -914,17 +914,105 @@ impl eframe::App for BladesApp {
                     );
                 }
                 egui::ScrollArea::both().show(ui, |ui| {
-                    let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-                        Self::assembly_layout(ui, text, wrap_width, current_line)
-                    };
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut self.source)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(30)
-                            .layouter(&mut layouter),
+                    let gutter_height = ui.text_style_height(&egui::TextStyle::Monospace) * 30.0;
+                    let (gutter, gutter_response, output) = ui
+                        .horizontal(|ui| {
+                            let (gutter, response) = ui.allocate_exact_size(
+                                egui::vec2(42.0, gutter_height),
+                                egui::Sense::click(),
+                            );
+                            let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                                Self::assembly_layout(ui, text, wrap_width, current_line)
+                            };
+                            let output = egui::TextEdit::multiline(&mut self.source)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(30)
+                                .layouter(&mut layouter)
+                                .show(ui);
+                            (gutter, response, output)
+                        })
+                        .inner;
+
+                    let painter = ui.painter_at(gutter);
+                    painter.rect_filled(gutter, 0.0, Color32::from_rgb(17, 22, 29));
+                    painter.line_segment(
+                        [gutter.right_bottom(), gutter.right_top()],
+                        Stroke::new(1.0_f32, Color32::from_rgb(42, 51, 63)),
                     );
-                    if response.changed() {
+                    let click_pos = gutter_response
+                        .clicked()
+                        .then(|| gutter_response.interact_pointer_pos())
+                        .flatten();
+                    let mut clicked_line = None;
+                    let mut source_line = 1usize;
+                    for row in &output.galley.rows {
+                        let y = output.galley_pos.y + row.rect.center().y;
+                        if gutter.top() <= y && y <= gutter.bottom() {
+                            let active = current_line == Some(source_line);
+                            if active {
+                                painter.rect_filled(
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(gutter.left(), y - row.rect.height() / 2.0),
+                                        egui::pos2(gutter.right(), y + row.rect.height() / 2.0),
+                                    ),
+                                    0.0,
+                                    Color32::from_rgb(31, 59, 73),
+                                );
+                            }
+                            let breakpoint = self.source_ready()
+                                && self.line_addresses.iter().any(|(line, address)| {
+                                    *line == source_line && self.cpu.breakpoints.contains(address)
+                                });
+                            if breakpoint {
+                                painter.circle_filled(
+                                    egui::pos2(gutter.left() + 8.0, y),
+                                    3.0,
+                                    Color32::from_rgb(231, 105, 105),
+                                );
+                            }
+                            let is_pc = active && self.source_ready();
+                            painter.text(
+                                egui::pos2(gutter.right() - 6.0, y),
+                                egui::Align2::RIGHT_CENTER,
+                                source_line.to_string(),
+                                egui::FontId::monospace(11.0),
+                                if is_pc {
+                                    Color32::LIGHT_GREEN
+                                } else if breakpoint {
+                                    Color32::from_rgb(235, 151, 151)
+                                } else {
+                                    Color32::from_rgb(111, 128, 147)
+                                },
+                            );
+                            if click_pos.is_some_and(|pos| {
+                                pos.y >= y - row.rect.height() / 2.0
+                                    && pos.y <= y + row.rect.height() / 2.0
+                            }) {
+                                clicked_line = Some(source_line);
+                            }
+                        }
+                        if row.ends_with_newline {
+                            source_line += 1;
+                        }
+                    }
+                    if let Some(line) = clicked_line.filter(|_| self.source_ready()) {
+                        if let Some((_, address)) =
+                            self.line_addresses.iter().find(|(n, _)| *n == line)
+                        {
+                            if self.cpu.breakpoints.contains(address) {
+                                self.cpu.breakpoints.retain(|item| item != address);
+                                self.log("INFO", format!("Breakpoint removido da linha {line}"));
+                            } else {
+                                self.cpu.breakpoints.push(*address);
+                                self.log(
+                                    "INFO",
+                                    format!("Breakpoint de linha {line} ativado em {address:04X}"),
+                                );
+                            }
+                        }
+                    }
+                    if output.response.changed() {
                         self.running = false;
                         self.error = None;
                         self.message = "Fonte modificada · monte novamente para executar".into();

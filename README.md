@@ -13,7 +13,7 @@ Aplicação desktop para montar, executar e depurar programas Assembly em uma CP
 
 ## Funcionalidades
 
-- Editor Assembly com realce de instruções, registradores, labels, diretivas, literais e comentários.
+- Editor Assembly com gutter numérico, breakpoints clicáveis por linha e realce de instruções, registradores, labels, diretivas, literais e comentários.
 - Destaque visual da linha correspondente ao PC e monitor com instrução anterior, atual e próximo endereço sequencial.
 - Abrir arquivos `.asm` por diálogo nativo; salvar por diálogo **Save As** ou pelo caminho digitado.
 - Montagem de duas passagens, resolução de labels, comentários com `;`, operandos decimais/hexadecimais e erros com linha.
@@ -99,4 +99,4 @@ Consulte [`docs/architecture.md`](docs/architecture.md), [`docs/instruction_set.
 
 ## Escopo atual
 
-O editor usa destaque lexical leve e ainda não oferece gutter numérico, autocomplete ou refatoração de labels. Registradores e words são inspecionáveis pelos painéis, mas sua edição manual ainda não está disponível; bytes de RAM podem ser editados. Preferências não são persistidas e não há CLI independente, empacotador de instalador ou benchmarks. A execução é sequencial, sem pipeline paralelo. O suporte em Linux está habilitado no eframe, mas ainda precisa de validação em CI e uso manual.
+O editor usa destaque lexical leve, sem parser incremental, autocomplete ou refatoração de labels. Registradores e words são inspecionáveis pelos painéis, mas sua edição manual ainda não está disponível; bytes de RAM podem ser editados. Preferências não são persistidas e não há CLI independente, empacotador de instalador ou benchmarks. A execução é sequencial, sem pipeline paralelo. O suporte em Linux está habilitado no eframe, mas ainda precisa de validação em CI e uso manual.
