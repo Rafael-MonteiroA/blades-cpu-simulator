@@ -43,7 +43,7 @@ impl BladesApp {
             message: "Pronto · BLADE-16 · 64 KB".into(),
             memory_address: "0200".into(),
             breakpoint_address: "0200".into(),
-            file_path: "examples/hello.asm".into(),
+            file_path: String::new(),
             memory_edit_address: "4000".into(),
             memory_edit_value: "00".into(),
             source_lines: vec![],
@@ -400,31 +400,71 @@ impl eframe::App for BladesApp {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.file_path)
                         .desired_width(150.0)
-                        .hint_text("path/to/program.asm"),
+                        .hint_text("unsaved program.asm"),
                 );
                 if ui.button("Open").clicked() {
-                    match std::fs::read_to_string(&self.file_path) {
-                        Ok(text) => {
-                            self.source = text;
-                            self.assembled = false;
-                            self.message = format!("Arquivo carregado: {}", self.file_path);
-                            self.error = None;
-                        }
-                        Err(e) => {
-                            self.error = Some(e.to_string());
-                            self.message = format!("Falha ao abrir arquivo: {e}");
+                    let mut dialog = rfd::FileDialog::new().add_filter("Assembly", &["asm"]);
+                    if let Some(parent) = std::path::Path::new(&self.file_path)
+                        .parent()
+                        .filter(|p| p.exists())
+                    {
+                        dialog = dialog.set_directory(parent);
+                    }
+                    if let Some(path) = dialog.pick_file() {
+                        self.file_path = path.display().to_string();
+                        match std::fs::read_to_string(&path) {
+                            Ok(text) => {
+                                self.source = text;
+                                self.assembled = false;
+                                self.message = format!("Arquivo carregado: {}", self.file_path);
+                                self.error = None;
+                            }
+                            Err(e) => {
+                                self.error = Some(e.to_string());
+                                self.message = format!("Falha ao abrir arquivo: {e}");
+                            }
                         }
                     }
                 }
                 if ui.button("Save").clicked() {
-                    match std::fs::write(&self.file_path, &self.source) {
-                        Ok(()) => {
-                            self.message = format!("Arquivo salvo: {}", self.file_path);
-                            self.error = None;
+                    let path = if self.file_path.trim().is_empty() {
+                        rfd::FileDialog::new()
+                            .add_filter("Assembly", &["asm"])
+                            .set_file_name("program.asm")
+                            .save_file()
+                    } else {
+                        Some(std::path::PathBuf::from(&self.file_path))
+                    };
+                    if let Some(path) = path {
+                        self.file_path = path.display().to_string();
+                        match std::fs::write(&path, &self.source) {
+                            Ok(()) => {
+                                self.message = format!("Arquivo salvo: {}", self.file_path);
+                                self.error = None;
+                            }
+                            Err(e) => {
+                                self.error = Some(e.to_string());
+                                self.message = format!("Falha ao salvar arquivo: {e}");
+                            }
                         }
-                        Err(e) => {
-                            self.error = Some(e.to_string());
-                            self.message = format!("Falha ao salvar arquivo: {e}");
+                    }
+                }
+                if ui.button("Save As").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Assembly", &["asm"])
+                        .set_file_name("program.asm")
+                        .save_file()
+                    {
+                        self.file_path = path.display().to_string();
+                        match std::fs::write(&path, &self.source) {
+                            Ok(()) => {
+                                self.message = format!("Arquivo salvo: {}", self.file_path);
+                                self.error = None;
+                            }
+                            Err(e) => {
+                                self.error = Some(e.to_string());
+                                self.message = format!("Falha ao salvar arquivo: {e}");
+                            }
                         }
                     }
                 }
