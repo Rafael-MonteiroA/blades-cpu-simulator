@@ -11,6 +11,14 @@ pub struct Flags {
     pub v: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemoryChange {
+    pub cycle: u64,
+    pub address: u16,
+    pub before: u8,
+    pub after: u8,
+}
+
 #[derive(Clone, Debug)]
 pub struct Cpu {
     pub r: [u16; 8],
@@ -23,6 +31,8 @@ pub struct Cpu {
     pub halted: bool,
     pub changed_registers: Vec<String>,
     pub changed_memory: Vec<u16>,
+    pub memory_changes: Vec<MemoryChange>,
+    pub memory_history: VecDeque<MemoryChange>,
     pub last_instruction: String,
     pub trace: VecDeque<String>,
     pub breakpoints: Vec<u16>,
@@ -47,6 +57,8 @@ impl Cpu {
             halted: false,
             changed_registers: vec![],
             changed_memory: vec![],
+            memory_changes: vec![],
+            memory_history: VecDeque::new(),
             last_instruction: "—".into(),
             trace: VecDeque::new(),
             breakpoints: vec![],
@@ -76,9 +88,31 @@ impl Cpu {
     }
     fn write_word(&mut self, addr: u16, v: u16) {
         let b = v.to_le_bytes();
-        self.memory[addr as usize] = b[0];
-        self.memory[addr.wrapping_add(1) as usize] = b[1];
-        self.changed_memory.extend([addr, addr.wrapping_add(1)]);
+        self.write_byte_internal(addr, b[0]);
+        self.write_byte_internal(addr.wrapping_add(1), b[1]);
+    }
+    fn write_byte_internal(&mut self, address: u16, value: u8) {
+        let before = self.memory[address as usize];
+        self.memory[address as usize] = value;
+        self.changed_memory.push(address);
+        if before != value {
+            let change = MemoryChange {
+                cycle: self.cycles,
+                address,
+                before,
+                after: value,
+            };
+            self.memory_changes.push(change);
+            self.memory_history.push_back(change);
+            if self.memory_history.len() > 512 {
+                self.memory_history.pop_front();
+            }
+        }
+    }
+    pub fn edit_memory_byte(&mut self, address: u16, value: u8) {
+        self.changed_memory.clear();
+        self.memory_changes.clear();
+        self.write_byte_internal(address, value);
     }
     fn fetch8(&mut self) -> u8 {
         let v = self.memory[self.pc as usize];
@@ -103,6 +137,7 @@ impl Cpu {
         }
         self.changed_registers.clear();
         self.changed_memory.clear();
+        self.memory_changes.clear();
         let start = self.pc;
         let before_r = self.r;
         let before_pc = self.pc;
@@ -376,9 +411,14 @@ impl Cpu {
         self.last_instruction = name.clone();
         let effects = self.changed_registers.join(",");
         let writes = self
-            .changed_memory
+            .memory_changes
             .iter()
-            .map(|a| format!("M[{a:04X}]"))
+            .map(|change| {
+                format!(
+                    "M[{:04X}] {:02X}→{:02X}",
+                    change.address, change.before, change.after
+                )
+            })
             .collect::<Vec<_>>()
             .join(",");
         let summary = match (effects.is_empty(), writes.is_empty()) {
@@ -501,6 +541,41 @@ mod tests {
         assert_eq!(c.cycles, 0);
         assert!(c.trace.is_empty());
         assert_eq!(c.last_instruction, "—");
+    }
+    #[test]
+    fn memory_writes_keep_old_new_values_and_manual_edits() {
+        let p = assemble("MOV R0, 0x1234\nSTORE [0x4000], R0").unwrap();
+        let mut c = Cpu::new();
+        c.load(&p.bytes, &p.vectors);
+        c.run_batch(2).unwrap();
+        assert_eq!(
+            c.memory_changes,
+            vec![
+                MemoryChange {
+                    cycle: 1,
+                    address: 0x4000,
+                    before: 0,
+                    after: 0x34,
+                },
+                MemoryChange {
+                    cycle: 1,
+                    address: 0x4001,
+                    before: 0,
+                    after: 0x12,
+                },
+            ]
+        );
+        assert!(c.trace.back().is_some_and(|entry| entry.contains("00→34")));
+        c.edit_memory_byte(0x4002, 0xaa);
+        assert_eq!(
+            c.memory_history.back(),
+            Some(&MemoryChange {
+                cycle: 2,
+                address: 0x4002,
+                before: 0,
+                after: 0xaa,
+            })
+        );
     }
     #[test]
     fn interrupt_saves_and_restores_context() {

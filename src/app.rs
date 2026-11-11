@@ -666,8 +666,7 @@ impl BladesApp {
                         u8::from_str_radix(self.memory_edit_value.trim_start_matches("0x"), 16);
                     match (addr, value) {
                         (Ok(a), Ok(v)) => {
-                            self.cpu.memory[a as usize] = v;
-                            self.cpu.changed_memory = vec![a];
+                            self.cpu.edit_memory_byte(a, v);
                             self.message = format!("RAM[{a:04X}] ← {v:02X}");
                             self.log("INFO", self.message.clone());
                         }
@@ -757,6 +756,32 @@ impl BladesApp {
                         }
                     });
             });
+            ui.collapsing(
+                format!("Write history · {} changes", self.cpu.memory_history.len()),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            for change in self.cpu.memory_history.iter().rev().take(16) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "C{:08}  M[{:04X}]  {:02X} → {:02X}",
+                                        change.cycle, change.address, change.before, change.after
+                                    ))
+                                    .monospace()
+                                    .size(10.0),
+                                );
+                            }
+                            if self.cpu.memory_history.is_empty() {
+                                ui.label(
+                                    RichText::new("No changed RAM bytes yet")
+                                        .italics()
+                                        .color(Color32::GRAY),
+                                );
+                            }
+                        });
+                },
+            );
         });
     }
 }
